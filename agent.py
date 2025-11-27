@@ -9,10 +9,12 @@ from langgraph.graph.message import add_messages
 import os
 from dotenv import load_dotenv
 load_dotenv()
+import sys 
+sys.setrecursionlimit(10**7) 
 
 EMAIL = os.getenv("EMAIL")
 SECRET = os.getenv("SECRET")
-RECURSION_LIMIT =  5000
+RECURSION_LIMIT =  10**7 
 # -------------------------------------------------
 # STATE
 # -------------------------------------------------
