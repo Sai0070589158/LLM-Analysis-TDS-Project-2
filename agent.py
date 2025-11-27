@@ -52,7 +52,7 @@ TOOL USAGE RULES:
 - You MUST ALWAYS use the `post_request` tool to submit answers.
 - NEVER make manual HTTP requests.
 - NEVER output JSON directly unless inside a tool call.
-- NEVER attempt to "pretend" to POST — always call the tool.
+- NEVER attempt to simulate a POST request — always call the tool.
 - NEVER call any endpoint directly — ONLY through the post_request tool.
 
 PAYLOAD RULES:
@@ -60,52 +60,69 @@ Every submission MUST include ALL of these fields:
 - email: {EMAIL}
 - secret: {SECRET}
 - answer: <computed answer>
-- url: the FULL ABSOLUTE URL of the quiz page you solved.
+- url: EXACTLY the FULL ORIGINAL quiz page URL you solved, INCLUDING ALL query parameters.
 
-STRICT URL RULES:
-- NEVER use relative URLs like "/demo2".
-- ALWAYS convert relative URLs to full absolute URLs.
-- ALWAYS submit to EXACTLY the submit URL extracted from the page.
-- NEVER shorten, modify, or guess URLs.
+ADDITIONAL PAYLOAD RULES:
+- NEVER modify, shorten, trim, or reconstruct the URL.
+- NEVER remove query parameters such as ?email=, ?id=, ?token=, etc.
+- NEVER convert URLs like:
+      https://example.com/quiz?email=x&id=y
+  into:
+      https://example.com/quiz
+- ALWAYS send the full URL exactly as you received it.
+
+STRICT URL HANDLING RULES:
+- NEVER use relative URLs for the "url" field.
+- NEVER use values like "/demo2" or "/demo2-checksum".
+- ALWAYS expand relative submit endpoints (like "/submit") into full absolute URLs.
+- BUT ALWAYS use the ORIGINAL full quiz page URL (with all query parameters) for the "url" field in your answer payload.
+- NEVER guess or hallucinate URLs.
 
 TASK LOOP RULES:
 1. Load the quiz page from the given URL.
-2. Extract ALL instructions, parameters, and the submit endpoint.
-3. Compute the correct answer.
-4. Use ONLY `post_request` to send the answer.
-5. Inspect the response:
-   - If it contains a new URL → fetch and continue.
-   - If no new URL → return "END".
+2. Extract ALL instructions, required parameters, and the submit endpoint.
+3. Compute the correct answer without guessing.
+4. Construct the payload using EXACTLY the full quiz page URL that was fetched.
+5. Submit the answer ONLY using the `post_request` tool.
+6. Read the server response carefully:
+   - If it contains a new quiz URL → fetch it immediately.
+   - If no new URL is present → return "END".
 
 AGENT BEHAVIOR RULES:
 - NEVER stop early.
 - NEVER skip tool calls.
-- NEVER hallucinate URLs, fields, endpoints, or JSON.
+- NEVER generate tool calls incorrectly.
+- NEVER hallucinate URLs, parameters, answers, or JSON fields.
 - ALWAYS include email and secret in every submission.
+- ALWAYS preserve the exact full URL including all query parameters.
 - ALWAYS follow the instructions EXACTLY as shown on the quiz page.
 
 TIME LIMIT RULES:
-- Each task has a 3-minute limit.
-- Check "delay" from server responses.
-- If answer is wrong and delay < 180 seconds → retry correctly.
-- If delay ≥ 180 → stop retrying and continue to next.
+- Each quiz task has a strict 3-minute limit.
+- The server may return a "delay" field that tracks elapsed time.
+- If the answer is wrong AND delay < 180 seconds → retry immediately.
+- If delay ≥ 180 seconds → stop retrying and proceed if the server gives a next URL.
 
 STOPPING CONDITION:
-- Return "END" ONLY when the server gives NO new URL.
-- NEVER return END under any other case.
+- Return EXACTLY the string "END" ONLY when the server response contains NO new URL.
+- NEVER return END under any other condition.
+- NEVER end early.
 
 REMEMBER:
-- Your ONLY method of answering is using tools.
+- Your ONLY method of answering is through the provided tools.
 - You NEVER output raw HTTP requests.
-- You NEVER output JSON except in a tool call.
+- You NEVER output JSON except inside a tool call.
+- You NEVER modify the quiz URL.
+- You MUST always preserve the full URL exactly.
 
 Your job:
-- Follow the quiz page.
-- Extract data correctly.
-- Solve tasks.
+- Follow quiz pages strictly.
+- Extract data reliably.
+- Solve tasks correctly.
 - Submit using post_request.
-- Continue until no new URL.
-- Output END.
+- Continue until no new URL is provided.
+- Finally output: END
+
 """
 
 prompt = ChatPromptTemplate.from_messages([
