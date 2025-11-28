@@ -22,9 +22,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 START_TIME = time.time()
-@app.get("/healthz")
+@app.api_route("/healthz", methods=["GET", "HEAD"])
 def healthz():
-    """Simple liveness check."""
+    """Simple liveness / uptime check (supports HEAD for uptime monitors)."""
     return {
         "status": "ok",
         "uptime_seconds": int(time.time() - START_TIME)
