@@ -44,12 +44,14 @@ rate_limiter = InMemoryRateLimiter(
 )
 
 llm = init_chat_model(
-    model_provider="openrouter",
-    model="meta-llama/llama-3.1-70b-instruct",
-    api_key=os.getenv("OPENROUTER_API_KEY"),
+    model_provider="openai",                          # keep provider OpenAI
+    model="nousresearch/hermes-3-llama-3.1-405b",     # or whichever OpenRouter model id you chose
+    client_params={
+        "base_url": "https://openrouter.ai/api/v1",   # OpenRouter base
+        "api_key": os.getenv("OPENROUTER_API_KEY")    # your OpenRouter key
+    },
     rate_limiter=rate_limiter
 ).bind_tools(TOOLS)
-
 
 # -------------------------------------------------
 # SYSTEM PROMPT
