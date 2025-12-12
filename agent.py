@@ -127,7 +127,22 @@ def agent_node(state: AgentState):
             return {"messages": [result]}
     # --- TIME HANDLING END ---
 
-     # --- SAFE TRIMMING (WORKS FOR ALL MODELS) ---
+        # --- SAFE TRIMMING (WORKS FOR ALL MODELS) ---
+    def _approx_token_counter(messages):
+        """
+        Lightweight token estimator for fallback trimming.
+        Accepts the same input as LangChain's token_counter: a list of messages.
+        Returns an integer token estimate (chars/4 heuristic).
+        """
+        total_chars = 0
+        for m in messages:
+            # support objects or dict-style messages
+            content = getattr(m, "content", None)
+            if content is None:
+                content = m.get("content", "") if isinstance(m, dict) else str(m)
+            total_chars += len(content)
+        return max(1, total_chars // 4)  # ≈ 1 token per ~4 chars
+
     try:
         trimmed_messages = trim_messages(
             messages=state["messages"],
@@ -135,16 +150,17 @@ def agent_node(state: AgentState):
             strategy="last",
             include_system=True,
             start_on="human",
-            token_counter=llm,     # works for GPT-Nano, GPT-4o, etc.
+            token_counter=llm,
         )
     except NotImplementedError:
-        print("⚠ Model does not support token counting — using fallback trimming.")
+        print("⚠ Model does not support token counting — using approximate token counter fallback.")
         trimmed_messages = trim_messages(
             messages=state["messages"],
             max_tokens=MAX_TOKENS,
             strategy="last",
             include_system=True,
             start_on="human",
+            token_counter=_approx_token_counter,
         )
 
     # Better check: Does it have a HumanMessage?
