@@ -45,7 +45,7 @@ rate_limiter = InMemoryRateLimiter(
 
 llm = init_chat_model(
     model_provider="openai",
-    model="gpt-oss-120b",
+    model="gpt-5.2-chat-latest",
     rate_limiter=rate_limiter
 ).bind_tools(TOOLS)
 
