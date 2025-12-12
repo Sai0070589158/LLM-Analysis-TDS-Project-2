@@ -14,8 +14,6 @@ from langgraph.graph.message import add_messages
 import os
 from dotenv import load_dotenv
 load_dotenv()
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-
 EMAIL = os.getenv("EMAIL")
 SECRET = os.getenv("SECRET")
 
@@ -40,9 +38,9 @@ TOOLS = [
 # LLM INIT
 # -------------------------------------------------
 rate_limiter = InMemoryRateLimiter(
-    requests_per_second=10,
+    requests_per_second=2,
     check_every_n_seconds=1,
-    max_bucket_size=20
+    max_bucket_size=4
 )
 
 llm = init_chat_model(
