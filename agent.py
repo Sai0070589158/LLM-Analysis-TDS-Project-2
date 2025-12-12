@@ -127,15 +127,26 @@ def agent_node(state: AgentState):
             return {"messages": [result]}
     # --- TIME HANDLING END ---
 
-    trimmed_messages = trim_messages(
-        messages=state["messages"],
-        max_tokens=MAX_TOKENS,
-        strategy="last",
-        include_system=True,
-        start_on="human",
-        token_counter=llm, 
-    )
-    
+     # --- SAFE TRIMMING (WORKS FOR ALL MODELS) ---
+    try:
+        trimmed_messages = trim_messages(
+            messages=state["messages"],
+            max_tokens=MAX_TOKENS,
+            strategy="last",
+            include_system=True,
+            start_on="human",
+            token_counter=llm,     # works for GPT-Nano, GPT-4o, etc.
+        )
+    except NotImplementedError:
+        print("⚠ Model does not support token counting — using fallback trimming.")
+        trimmed_messages = trim_messages(
+            messages=state["messages"],
+            max_tokens=MAX_TOKENS,
+            strategy="last",
+            include_system=True,
+            start_on="human",
+        )
+
     # Better check: Does it have a HumanMessage?
     has_human = any(msg.type == "human" for msg in trimmed_messages)
     
