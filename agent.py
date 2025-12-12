@@ -8,12 +8,13 @@ from tools import (
     run_code, add_dependencies, ocr_image_tool, transcribe_audio, encode_image_to_base64
 )
 from typing import TypedDict, Annotated, List
-from langchain_core.messages import trim_messages, HumanMessage
+from langchain_core.messages import HumanMessage
 from langchain.chat_models import init_chat_model
 from langgraph.graph.message import add_messages
 import os
 from dotenv import load_dotenv
 load_dotenv()
+
 EMAIL = os.getenv("EMAIL")
 SECRET = os.getenv("SECRET")
 
@@ -35,7 +36,7 @@ TOOLS = [
 
 
 # -------------------------------------------------
-# LLM INIT
+# LLM INIT (OPENROUTER COMPATIBLE)
 # -------------------------------------------------
 rate_limiter = InMemoryRateLimiter(
     requests_per_second=1,
@@ -45,13 +46,18 @@ rate_limiter = InMemoryRateLimiter(
 
 llm = init_chat_model(
     model_provider="openai",
-    model="nousresearch/hermes-3-llama-3.1-405b",
-    model_kwargs={
+    model="google/gemini-2.0-flash-exp",
+    rate_limiter=rate_limiter,
+    client_params={
         "base_url": "https://openrouter.ai/api/v1",
-        "api_key": os.getenv("OPENROUTER_API_KEY")
-    },
-    rate_limiter=rate_limiter
+        "api_key": os.getenv("OPENROUTER_API_KEY"),
+        "headers": {
+            "HTTP-Referer": "https://your-app.com",
+            "X-Title": "TDS-Project-2-Agent"
+        }
+    }
 ).bind_tools(TOOLS)
+
 
 # -------------------------------------------------
 # SYSTEM PROMPT
@@ -83,16 +89,12 @@ Rules:
 # NEW NODE: HANDLE MALFORMED JSON
 # -------------------------------------------------
 def handle_malformed_node(state: AgentState):
-    """
-    If the LLM generates invalid JSON, this node sends a correction message
-    so the LLM can try again.
-    """
     print("--- DETECTED MALFORMED JSON. ASKING AGENT TO RETRY ---")
     return {
         "messages": [
             {
-                "role": "user", 
-                "content": "SYSTEM ERROR: Your last tool call was Malformed (Invalid JSON). Please rewrite the code and try again. Ensure you escape newlines and quotes correctly inside the JSON."
+                "role": "user",
+                "content": "SYSTEM ERROR: Your last tool call was Malformed (Invalid JSON). Fix and retry."
             }
         ]
     }
@@ -102,12 +104,12 @@ def handle_malformed_node(state: AgentState):
 # AGENT NODE
 # -------------------------------------------------
 def agent_node(state: AgentState):
+
     # --- TIME HANDLING START ---
     cur_time = time.time()
     cur_url = os.getenv("url")
-    
-    # SAFE GET: Prevents crash if url is None or not in dict
-    prev_time = url_time.get(cur_url) 
+
+    prev_time = url_time.get(cur_url)
     offset = os.getenv("offset", "0")
 
     if prev_time is not None:
@@ -115,96 +117,55 @@ def agent_node(state: AgentState):
         diff = cur_time - prev_time
 
         if diff >= 180 or (offset != "0" and (cur_time - float(offset)) > 90):
-            print(f"Timeout exceeded ({diff}s) — instructing LLM to purposely submit wrong answer.")
+            print(f"Timeout exceeded ({diff}s) — submitting WRONG answer")
 
             fail_instruction = """
-            You have exceeded the time limit for this task (over 180 seconds).
-            Immediately call the `post_request` tool and submit a WRONG answer for the CURRENT quiz.
+            You have exceeded the time limit (180s).
+            Immediately call `post_request` and submit a WRONG answer.
             """
 
-            # Using HumanMessage (as you correctly implemented)
             fail_msg = HumanMessage(content=fail_instruction)
-
-            # We invoke the LLM immediately with this new instruction
             result = llm.invoke(state["messages"] + [fail_msg])
             return {"messages": [result]}
-    # --- TIME HANDLING END ---
 
-        # --- SAFE TRIMMING (WORKS FOR ALL MODELS) ---
-    def _approx_token_counter(messages):
-        """
-        Lightweight token estimator for fallback trimming.
-        Accepts the same input as LangChain's token_counter: a list of messages.
-        Returns an integer token estimate (chars/4 heuristic).
-        """
-        total_chars = 0
-        for m in messages:
-            # support objects or dict-style messages
-            content = getattr(m, "content", None)
-            if content is None:
-                content = m.get("content", "") if isinstance(m, dict) else str(m)
-            total_chars += len(content)
-        return max(1, total_chars // 4)  # ≈ 1 token per ~4 chars
+    # -------------------------------------------------
+    # SAFE TRIMMING (NO TOKEN COUNTING)
+    # -------------------------------------------------
+    print("⚠ Model does not support token counting — trimming to last 40 messages")
+    trimmed_messages = state["messages"]
+    if len(trimmed_messages) > 40:
+        trimmed_messages = trimmed_messages[-40:]
 
-    try:
-        trimmed_messages = trim_messages(
-            messages=state["messages"],
-            max_tokens=MAX_TOKENS,
-            strategy="last",
-            include_system=True,
-            start_on="human",
-            token_counter=llm,
-        )
-    except NotImplementedError:
-        print("⚠ Model does not support token counting — using approximate token counter fallback.")
-        trimmed_messages = trim_messages(
-            messages=state["messages"],
-            max_tokens=MAX_TOKENS,
-            strategy="last",
-            include_system=True,
-            start_on="human",
-            token_counter=_approx_token_counter,
-        )
-
-    # Better check: Does it have a HumanMessage?
-    has_human = any(msg.type == "human" for msg in trimmed_messages)
-    
+    # Ensure at least one human message exists
+    has_human = any(getattr(msg, "type", None) == "human" for msg in trimmed_messages)
     if not has_human:
-        print("WARNING: Context was trimmed too far. Injecting state reminder.")
-        # We remind the agent of the current URL from the environment
         current_url = os.getenv("url", "Unknown URL")
-        reminder = HumanMessage(content=f"Context cleared due to length. Continue processing URL: {current_url}")
-        
-        # We append this to the trimmed list (temporarily for this invoke)
-        trimmed_messages.append(reminder)
-    # ----------------------------------------
+        print("WARNING: No human message found. Injecting reminder.")
+        trimmed_messages.append(
+            HumanMessage(content=f"Context lost. Continue processing URL: {current_url}")
+        )
 
     print(f"--- INVOKING AGENT (Context: {len(trimmed_messages)} items) ---")
-    
     result = llm.invoke(trimmed_messages)
-
     return {"messages": [result]}
 
 
 # -------------------------------------------------
-# ROUTE LOGIC (UPDATED FOR MALFORMED CALLS)
+# ROUTE LOGIC
 # -------------------------------------------------
 def route(state):
     last = state["messages"][-1]
-    
-    # 1. CHECK FOR MALFORMED FUNCTION CALLS
+
     if "finish_reason" in last.response_metadata:
         if last.response_metadata["finish_reason"] == "MALFORMED_FUNCTION_CALL":
             return "handle_malformed"
 
-    # 2. CHECK FOR VALID TOOLS
-    tool_calls = getattr(last, "tool_calls", None)
-    if tool_calls:
+    if getattr(last, "tool_calls", None):
         print("Route → tools")
         return "tools"
 
-    # 3. CHECK FOR END
     content = getattr(last, "content", None)
+
     if isinstance(content, str) and content.strip() == "END":
         return END
 
@@ -221,24 +182,21 @@ def route(state):
 # -------------------------------------------------
 graph = StateGraph(AgentState)
 
-# Add Nodes
 graph.add_node("agent", agent_node)
 graph.add_node("tools", ToolNode(TOOLS))
-graph.add_node("handle_malformed", handle_malformed_node) # Add the repair node
+graph.add_node("handle_malformed", handle_malformed_node)
 
-# Add Edges
 graph.add_edge(START, "agent")
 graph.add_edge("tools", "agent")
-graph.add_edge("handle_malformed", "agent") # Retry loop
+graph.add_edge("handle_malformed", "agent")
 
-# Conditional Edges
 graph.add_conditional_edges(
-    "agent", 
+    "agent",
     route,
     {
         "tools": "tools",
         "agent": "agent",
-        "handle_malformed": "handle_malformed", # Map the new route
+        "handle_malformed": "handle_malformed",
         END: END
     }
 )
@@ -250,7 +208,6 @@ app = graph.compile()
 # RUNNER
 # -------------------------------------------------
 def run_agent(url: str):
-    # system message is seeded ONCE here
     initial_messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": url}
