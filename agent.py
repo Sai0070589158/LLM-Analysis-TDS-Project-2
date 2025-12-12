@@ -38,14 +38,15 @@ TOOLS = [
 # LLM INIT
 # -------------------------------------------------
 rate_limiter = InMemoryRateLimiter(
-    requests_per_second=2,
+    requests_per_second=1,
     check_every_n_seconds=1,
-    max_bucket_size=4
+    max_bucket_size=5
 )
 
 llm = init_chat_model(
-    model_provider="openai",
-    model="gpt-5.2-chat-latest",
+    model_provider="openrouter",
+    model="meta-llama/llama-3.1-70b-instruct",
+    api_key=os.getenv("OPENROUTER_API_KEY"),
     rate_limiter=rate_limiter
 ).bind_tools(TOOLS)
 
